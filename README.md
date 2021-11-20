@@ -3,6 +3,5 @@
 ```shell
 npx hardhat compile
 npx hardhat test
-node scripts/sample-script.js
-npx hardhat help
+node scripts/deploy.js
 ```
