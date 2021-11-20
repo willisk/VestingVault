@@ -30,6 +30,10 @@ describe('VestingVault', () => {
   let cliffDate;
 
   beforeEach(async function () {
+    vestingStartDate = time.future1d;
+    vestingEndDate = vestingStartDate.add(vestingTerm);
+    cliffDate = vestingStartDate.add(cliffPeriod);
+
     [owner, receiver1, receiver2, ...signers] = await ethers.getSigners();
 
     const VestingVault = await ethers.getContractFactory('VestingVault');
@@ -38,14 +42,10 @@ describe('VestingVault', () => {
     token = await GamingStars.deploy();
     await token.deployed();
 
-    contract = await VestingVault.deploy(token.address, time.future1d);
+    contract = await VestingVault.deploy(token.address, vestingStartDate);
     await contract.deployed();
 
     await token.approve(contract.address, ethers.constants.MaxUint256);
-
-    vestingStartDate = time.future1d;
-    vestingEndDate = vestingStartDate.add(vestingTerm);
-    cliffDate = vestingStartDate.add(cliffPeriod);
   });
 
   describe('when creating the vault', async () => {
