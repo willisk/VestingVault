@@ -28,10 +28,10 @@ async function main() {
   console.log('Token deployed to:', token.address);
   console.log('Vault deployed to:', contract.address);
 
-  allocations.forEach(async (allocation) => {
-    console.log('adding allocation', allocation);
+  for (let allocation of allocations) {
     await contract.addAllocation(allocation.address, allocation.amount, allocation.revocable);
-  });
+    console.log('allocation added:', allocation);
+  }
 }
 
 main()
