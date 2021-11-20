@@ -103,7 +103,19 @@ contract VestingVault is Ownable {
         require(token.transfer(msg.sender, remainderOwner), 'could not transfer token');
     }
 
-    // ====== modifier ======
+    function withdrawToken(IBEP20 _token) external onlyOwner {
+        require(_token != token, 'cannot withdraw vault token');
+        uint256 balance = _token.balanceOf(address(this));
+        bool _success = _token.transfer(owner(), balance);
+        require(_success, 'BEP20 Token could not be transferred');
+    }
+
+    function withdraw() external onlyOwner {
+        (bool _success, ) = owner().call{value: address(this).balance}('');
+        require(_success, 'balance could not be transferred');
+    }
+
+    // -------- modifier --------
 
     modifier onlyBeforeStart() {
         require(block.timestamp < vestingStartDate, 'must be before start date');
