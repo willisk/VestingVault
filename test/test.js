@@ -48,6 +48,24 @@ describe('VestingVault', () => {
     await token.approve(contract.address, ethers.constants.MaxUint256);
   });
 
+  it('allow owner withdrawing for non-vault tokens', async () => {
+    const GamingStars = await ethers.getContractFactory('GamingStars');
+    const testToken = await GamingStars.deploy();
+    await testToken.deployed();
+
+    await expect(contract.withdrawToken(token.address)).to.be.revertedWith('cannot withdraw vault token');
+    await expect(contract.connect(receiver1).withdrawToken(testToken.address)).to.be.revertedWith(
+      'Ownable: caller is not the owner'
+    );
+
+    await testToken.transfer(contract.address, 100);
+
+    let ownerBalanceBefore = await testToken.balanceOf(owner.address);
+    await contract.withdrawToken(testToken.address);
+    let ownerBalanceAfter = await testToken.balanceOf(owner.address);
+    expect(ownerBalanceAfter.sub(ownerBalanceBefore)).to.be.equal(100);
+  });
+
   describe('when creating the vault', async () => {
     it('all fields are set correctly', async () => {
       expect(await token.owner()).to.equal(owner.address);

@@ -40,7 +40,7 @@ contract VestingVault is Ownable {
 
     function claimableAmount(address receiver) public view returns (uint256) {
         if (block.timestamp < vestingStartDate) return 0;
-        // if (block.timestamp < cliffDate) return 0; // XXX: not sure if cliff should be set this way
+        // if (block.timestamp < cliffDate) return 0; // XXX: not sure if cliff is necessary
 
         uint256 timeDelta = block.timestamp - vestingStartDate;
         timeDelta = (timeDelta / PAYOUT_RATE) * PAYOUT_RATE;
@@ -84,7 +84,6 @@ contract VestingVault is Ownable {
     }
 
     function revokeAllowance(address receiver) external onlyOwner {
-        // should be onlyBeforeCliff?
         require(revocable[receiver], 'allocation is not revocable');
         require(allowed[receiver], 'receiver not allowed');
 
@@ -108,11 +107,6 @@ contract VestingVault is Ownable {
         uint256 balance = _token.balanceOf(address(this));
         bool _success = _token.transfer(owner(), balance);
         require(_success, 'BEP20 Token could not be transferred');
-    }
-
-    function withdraw() external onlyOwner {
-        (bool _success, ) = owner().call{value: address(this).balance}('');
-        require(_success, 'balance could not be transferred');
     }
 
     // -------- modifier --------
