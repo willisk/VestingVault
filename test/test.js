@@ -23,16 +23,13 @@ describe('VestingVault', () => {
   let signers;
 
   const vestingTerm = time.delta2y;
-  const cliffPeriod = time.delta30d;
 
   let vestingStartDate;
   let vestingEndDate;
-  let cliffDate;
 
   beforeEach(async function () {
     vestingStartDate = time.future1d;
     vestingEndDate = vestingStartDate.add(vestingTerm);
-    cliffDate = vestingStartDate.add(cliffPeriod);
 
     [owner, receiver1, receiver2, ...signers] = await ethers.getSigners();
 
@@ -79,7 +76,6 @@ describe('VestingVault', () => {
 
       expect(await contract.vestingStartDate()).to.be.closeTo(vestingStartDate, 2);
       expect(await contract.vestingEndDate()).to.be.closeTo(vestingEndDate, 2);
-      expect(await contract.cliffDate()).to.be.closeTo(cliffDate, 2);
     });
 
     it('owner access control is set', async () => {
@@ -217,6 +213,15 @@ describe('VestingVault', () => {
 
       let ownerBalanceAfter = await token.balanceOf(owner.address);
       expect(ownerBalanceAfter.sub(ownerBalanceBefore)).to.equal(totalAllocation.sub(claimableAmount));
+    });
+
+    it('ability to revoke can be removed', async () => {
+      await expect(contract.connect(receiver2).removeRevocability(receiver1.address)).to.be.revertedWith(
+        'Ownable: caller is not the owner'
+      );
+
+      await contract.removeRevocability(receiver1.address);
+      await expect(contract.revokeAllowance(receiver1.address)).to.be.revertedWith('allocation is not revocable');
     });
   });
 });

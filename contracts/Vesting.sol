@@ -1,15 +1,18 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-// import 'hardhat/console.sol';
-// import '@openzeppelin/contracts/token/ERC20/ERC20.sol';
-// import '@openzeppelin/contracts/token/ERC20/IERC20.sol';
-// import '@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol';
-
 import './IBEP20.sol';
 
 import '@openzeppelin/contracts/access/Ownable.sol';
 
+/**
+ * @dev BEP20 Vesting contract. Releases the tokens linearly over the duration `VESTING_TERM`.
+ * Paid out every `PAYOUT_RATE`.
+ *
+ * Allocations are added by the owner by transferring the tokens to the contract. These will be
+ * vested over the full duration. Allocations can be revocable, returning the tokens to the owner.
+ *
+ */
 contract VestingVault is Ownable {
     event AllocationAdded(address indexed receiver, uint256 amount);
 
@@ -21,7 +24,6 @@ contract VestingVault is Ownable {
 
     uint256 public vestingStartDate;
     uint256 public vestingEndDate;
-    uint256 public cliffDate;
 
     mapping(address => uint256) public totalClaimed;
     mapping(address => uint256) public totalAllocation;
@@ -33,14 +35,15 @@ contract VestingVault is Ownable {
         token = _token;
         vestingStartDate = _startDate;
         vestingEndDate = vestingStartDate + VESTING_TERM;
-        cliffDate = vestingStartDate + CLIFF_PERIOD;
     }
 
     // -------- view -------
 
+    /**
+     * @dev Calculates the amount that is claimable by caller.
+     */
     function claimableAmount(address receiver) public view returns (uint256) {
         if (block.timestamp < vestingStartDate) return 0;
-        // if (block.timestamp < cliffDate) return 0; // XXX: not sure if cliff is necessary
 
         uint256 timeDelta = block.timestamp - vestingStartDate;
         timeDelta = (timeDelta / PAYOUT_RATE) * PAYOUT_RATE;
@@ -54,6 +57,12 @@ contract VestingVault is Ownable {
 
     // -------- user api -------
 
+    /**
+     * @dev Invokes the claim to the tokens calculated by `claimableAmount`.
+     *
+     * Throws if receiver does not have any allocation, or no tokens to claim.
+     * Throws on token transfer failure.
+     */
     function claim() external {
         require(allowed[msg.sender], 'not allowed');
 
@@ -66,6 +75,15 @@ contract VestingVault is Ownable {
 
     // -------- admin -------
 
+    /**
+     * @dev Creates an allocation of `amount` to `receiver`.
+     * `revocable` determines whether this allocation can be revoked by the owner.
+     *
+     * Requirements:
+     *  - can only be called before `vestingStartDate`
+     *  - `amount` must be greater 0
+     *  - allocation must not override previous allocation
+     */
     function addAllocation(
         address receiver,
         uint256 amount,
@@ -83,6 +101,14 @@ contract VestingVault is Ownable {
         emit AllocationAdded(receiver, amount);
     }
 
+    /**
+     * @dev Revokes allowance to a claim on allocation.
+     * `revocable` determines whether this allocation can be revoked by the owner.
+     *
+     * Requirements:
+     *  - allocation must be revocable
+     *  - receiver must previously be allowed to withdraw from allocation
+     */
     function revokeAllowance(address receiver) external onlyOwner {
         require(revocable[receiver], 'allocation is not revocable');
         require(allowed[receiver], 'receiver not allowed');
@@ -102,6 +128,20 @@ contract VestingVault is Ownable {
         require(token.transfer(msg.sender, remainderOwner), 'could not transfer token');
     }
 
+    /**
+     * @dev Removes the ability of the owner to revoke this allocation.
+     */
+    function removeRevocability(address receiver) external onlyOwner {
+        // require(revocable[receiver], 'allocation is not revocable');
+        require(allowed[receiver], 'receiver not allowed');
+
+        revocable[receiver] = false;
+    }
+
+    /**
+     * @dev Allows for tokens that were accidentally sent to the contract to be withdrawn.
+     * Cannot be called for the token used for vesting.
+     */
     function withdrawToken(IBEP20 _token) external onlyOwner {
         require(_token != token, 'cannot withdraw vault token');
         uint256 balance = _token.balanceOf(address(this));
@@ -113,11 +153,6 @@ contract VestingVault is Ownable {
 
     modifier onlyBeforeStart() {
         require(block.timestamp < vestingStartDate, 'must be before start date');
-        _;
-    }
-
-    modifier onlyBeforeCliff() {
-        require(block.timestamp < cliffDate, 'must be before cliff date');
         _;
     }
 

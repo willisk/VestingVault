@@ -10,7 +10,7 @@ node scripts/deploy.js
 
 ```
   VestingVault
-    ✓ allow owner withdrawing for non-vault tokens (74ms)
+    ✓ allow owner withdrawing for non-vault tokens (75ms)
     when creating the vault
       ✓ all fields are set correctly
       ✓ owner access control is set
@@ -27,7 +27,8 @@ node scripts/deploy.js
       ✓ amount is correctly paid out over time
     when revoking
       ✓ amount is calculated correctly
+      ✓ ability to revoke can be removed
 
 
-  13 passing (1s)
+  14 passing (1s)
 ```
