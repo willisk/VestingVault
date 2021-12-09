@@ -1,37 +1,60 @@
 const hre = require('hardhat');
 const { ethers } = require('hardhat');
+const { getContractAddress } = require('@ethersproject/address');
+
+const BN = ethers.BigNumber.from;
+
 const { centerTime } = require('./time.js');
-
 var time = centerTime();
-
 const vestingStartDate = time.future1d;
 
+const allAllocations = require('../allAllocations.json');
+
+const admin = '0x56BEe757266812646a0DD07d93232210529CFeE8'; // holds vault ownership, founder
+
 async function main() {
-  const [owner, receiver1, receiver2, ...signers] = await ethers.getSigners();
+  const [owner, ...signers] = await ethers.getSigners();
 
-  const allocations = [
-    { address: receiver1.address, amount: 10_100, revocable: true },
-    { address: receiver2.address, amount: 300, revocable: false },
-  ];
+  console.log('Sender address', owner.address);
 
-  const VestingVault = await ethers.getContractFactory('VestingVault');
   const GamingStars = await ethers.getContractFactory('GamingStars');
+  const VestingVault = await ethers.getContractFactory('VestingVault');
 
-  token = await GamingStars.deploy();
+  const token = await GamingStars.deploy();
   await token.deployed();
+  // console.log('Owner address Contract', await token.owner());
 
-  contract = await VestingVault.deploy(token.address, vestingStartDate);
-  await contract.deployed();
+  const totalSupply = await token.totalSupply();
+  const symbol = await token.symbol();
+  const name = await token.name();
+  console.log(`\nToken '${name}' (${symbol})', supply`, totalSupply.toString(), 'deployed to', token.address);
 
-  await token.approve(contract.address, ethers.constants.MaxUint256);
+  const nonce = await owner.getTransactionCount();
+  const vaultFutureAddress = getContractAddress({ from: owner.address, nonce: nonce + 1 });
 
-  console.log('Token deployed to:', token.address);
-  console.log('Vault deployed to:', contract.address);
+  const tx = await token.approve(vaultFutureAddress, ethers.constants.MaxUint256);
+  await tx.wait();
+  const vault = await VestingVault.deploy(token.address, vestingStartDate, allAllocations);
+  await vault.deployed();
 
-  for (let allocation of allocations) {
-    await contract.addAllocation(allocation.address, allocation.amount, allocation.revocable);
-    console.log('allocation added:', allocation);
-  }
+  const vestingStartDateContract = await vault.vestingStartDate();
+  const vestingEndDateContract = await vault.vestingEndDate();
+  console.log('Vault deployed to:', vault.address);
+  console.log('Vault args:', token.address, vestingStartDate.toString(), 'allAllocations');
+  console.log(
+    'Vesting term:',
+    new Date(vestingStartDateContract.toNumber() * 1000),
+    '-',
+    new Date(vestingEndDateContract.toNumber() * 1000)
+  );
+
+  await token.transferOwnership(admin);
+  const newOwnerToken = await token.owner();
+  console.log('\nToken Ownership transferred, new owner:', newOwnerToken);
+
+  await vault.transferOwnership(admin);
+  const newOwnerVault = await vault.owner();
+  console.log('Vault Ownership transferred, new owner:', newOwnerVault);
 }
 
 main()

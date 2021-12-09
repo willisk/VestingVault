@@ -1,0 +1,48 @@
+[
+  {
+    "name": "Team",
+    "totalPerMille": "300",
+    "initialPerMille": "200",
+    "allocations": [
+      {
+        "receiver": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "amountPerMille": "700",
+        "revocable": true
+      },
+      {
+        "receiver": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "amountPerMille": "300",
+        "revocable": false
+      }
+    ]
+  },
+  {
+    "name": "Treasury",
+    "totalPerMille": "200",
+    "initialPerMille": "100",
+    "allocations": [
+      {
+        "receiver": "0x8A03225BF61D4d782BAeE64Ce43cc0c08AE4CebF",
+        "amountPerMille": "1000",
+        "revocable": false
+      }
+    ]
+  },
+  {
+    "name": "Pre-sale",
+    "totalPerMille": "500",
+    "initialPerMille": "200",
+    "allocations": [
+      {
+        "receiver": "0x1f91699d6F8bf4AD672966C5EEf167bd45Bd0912",
+        "amountPerMille": "800",
+        "revocable": false
+      },
+      {
+        "receiver": "0x4545c9b73229ab4adf12a1e123a8be78e1a0cdc9",
+        "amountPerMille": "200",
+        "revocable": false
+      }
+    ]
+  }
+]

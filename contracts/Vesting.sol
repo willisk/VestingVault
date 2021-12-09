@@ -5,6 +5,56 @@ import './IBEP20.sol';
 
 import '@openzeppelin/contracts/access/Ownable.sol';
 
+contract VestingDeployer {
+    struct Allocation {
+        address receiver;
+        uint256 amountPerMille;
+        bool revocable;
+    }
+
+    struct GroupedAllocation {
+        string name;
+        uint256 totalPerMille;
+        uint256 initialPerMille;
+        Allocation[] allocations;
+    }
+
+    address public vaultAddress;
+
+    constructor(
+        IBEP20 token,
+        uint256 startDate,
+        GroupedAllocation[] memory allAllocations
+    ) {
+        VestingVault vault = new VestingVault(token, startDate);
+        vaultAddress = address(vault);
+
+        if (allAllocations.length > 0) {
+            uint256 totalSupply = token.totalSupply();
+            token.transferFrom(msg.sender, address(this), totalSupply);
+            token.approve(vaultAddress, totalSupply);
+
+            for (uint256 i; i < allAllocations.length; i++) {
+                GroupedAllocation memory groupAllocation = allAllocations[i];
+                uint256 amountGroup = (totalSupply * groupAllocation.totalPerMille) / 1000;
+
+                for (uint256 j; j < groupAllocation.allocations.length; j++) {
+                    Allocation memory allocation = groupAllocation.allocations[j];
+
+                    uint256 amount = (amountGroup * allocation.amountPerMille) / 1000;
+                    uint256 initial = (amount * groupAllocation.initialPerMille) / 1000;
+                    uint256 remainder = amount - initial;
+
+                    if (initial > 0) token.transfer(allocation.receiver, initial);
+                    vault.addAllocation(allocation.receiver, remainder, allocation.revocable);
+                }
+            }
+        }
+
+        vault.transferOwnership(msg.sender);
+    }
+}
+
 /**
  * @dev BEP20 Vesting contract. Releases the tokens linearly over the duration `VESTING_TERM`.
  * Paid out every `PAYOUT_RATE`.
@@ -14,7 +64,7 @@ import '@openzeppelin/contracts/access/Ownable.sol';
  *
  */
 contract VestingVault is Ownable {
-    event AllocationAdded(address indexed receiver, uint256 amount);
+    event AllocationAdded(address indexed receiver, uint256 amount, bool revocable);
 
     IBEP20 public token;
 
@@ -88,7 +138,7 @@ contract VestingVault is Ownable {
         address receiver,
         uint256 amount,
         bool _revocable
-    ) external onlyOwner onlyBeforeStart {
+    ) public onlyOwner onlyBeforeStart {
         require(totalAllocation[receiver] == 0, 'must be unique allocation');
         require(amount > 0, 'amount must be greater 0');
 
@@ -98,7 +148,7 @@ contract VestingVault is Ownable {
 
         require(token.transferFrom(msg.sender, address(this), amount), 'could not transfer token');
 
-        emit AllocationAdded(receiver, amount);
+        emit AllocationAdded(receiver, amount, _revocable);
     }
 
     /**
@@ -107,11 +157,9 @@ contract VestingVault is Ownable {
      *
      * Requirements:
      *  - allocation must be revocable
-     *  - receiver must previously be allowed to withdraw from allocation
      */
     function revokeAllowance(address receiver) external onlyOwner {
         require(revocable[receiver], 'allocation is not revocable');
-        require(allowed[receiver], 'receiver not allowed');
 
         uint256 claimableReceiver = claimableAmount(receiver);
 
@@ -132,7 +180,6 @@ contract VestingVault is Ownable {
      * @dev Removes the ability of the owner to revoke this allocation.
      */
     function removeRevocability(address receiver) external onlyOwner {
-        // require(revocable[receiver], 'allocation is not revocable');
         require(allowed[receiver], 'receiver not allowed');
 
         revocable[receiver] = false;
@@ -153,11 +200,6 @@ contract VestingVault is Ownable {
 
     modifier onlyBeforeStart() {
         require(block.timestamp < vestingStartDate, 'must be before start date');
-        _;
-    }
-
-    modifier isAllowed(address receiver) {
-        require(allowed[receiver], 'not allowed');
         _;
     }
 }

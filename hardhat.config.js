@@ -1,4 +1,5 @@
 require('@nomiclabs/hardhat-waffle');
+require('@nomiclabs/hardhat-etherscan');
 require('dotenv').config();
 
 // This is a sample Hardhat task. To learn how to create your own go to
@@ -42,13 +43,27 @@ module.exports = {
     ],
   },
   networks: {
-    bsc: {
-      url: process.env.MORALIS_KEY_BSC,
+    bscTest: {
+      url: process.env.PROVIDER_BSC_TEST,
       accounts: [process.env.PRIVATE_KEY1, process.env.PRIVATE_KEY2],
     },
     kovan: {
-      url: process.env.ALCHEMY_KEY_KOVAN,
+      url: process.env.PROVIDER_KOVAN,
       accounts: [process.env.PRIVATE_KEY1, process.env.PRIVATE_KEY2],
+      gasPrice: 10,
     },
+    fuji: {
+      url: process.env.PROVIDER_FUJI,
+      accounts: [process.env.PRIVATE_KEY1, process.env.PRIVATE_KEY2],
+      // gasPrice: 10,
+    },
+  },
+  mocha: {
+    timeout: 0,
+  },
+  etherscan: {
+    // apiKey: process.env.ETHERSCAN_KEY,
+    apiKey: process.env.BSCSCAN_KEY,
+    // apiKey: process.env.SNOWTRACE_KEY,
   },
 };
