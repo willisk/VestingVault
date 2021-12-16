@@ -2,16 +2,10 @@ const hre = require('hardhat');
 const { ethers } = require('hardhat');
 
 async function main() {
-  const marketing = ethers.Wallet.createRandom();
-  const treasury = ethers.Wallet.createRandom();
-
-  console.log('public addresses');
-  console.log(marketing.address);
-  console.log(treasury.address);
-
-  console.log();
-  console.log('PRIVATE_KEY_MARKETING =', marketing.privateKey);
-  console.log('PRIVATE_KEY_TREASURY =', treasury.privateKey);
+  for (let i = 0; i < 10; i++) {
+    const wallet = ethers.Wallet.createRandom();
+    console.log('address:', wallet.address, 'privKey:', wallet.privateKey);
+  }
 }
 
 main()

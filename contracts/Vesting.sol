@@ -2,58 +2,7 @@
 pragma solidity ^0.8.0;
 
 import './IBEP20.sol';
-
 import '@openzeppelin/contracts/access/Ownable.sol';
-
-contract VestingDeployer {
-    struct Allocation {
-        address receiver;
-        uint256 amountPerMille;
-        bool revocable;
-    }
-
-    struct GroupedAllocation {
-        string name;
-        uint256 totalPerMille;
-        uint256 initialPerMille;
-        Allocation[] allocations;
-    }
-
-    address public vaultAddress;
-
-    constructor(
-        IBEP20 token,
-        uint256 startDate,
-        GroupedAllocation[] memory allAllocations
-    ) {
-        VestingVault vault = new VestingVault(token, startDate);
-        vaultAddress = address(vault);
-
-        if (allAllocations.length > 0) {
-            uint256 totalSupply = token.totalSupply();
-            token.transferFrom(msg.sender, address(this), totalSupply);
-            token.approve(vaultAddress, totalSupply);
-
-            for (uint256 i; i < allAllocations.length; i++) {
-                GroupedAllocation memory groupAllocation = allAllocations[i];
-                uint256 amountGroup = (totalSupply * groupAllocation.totalPerMille) / 1000;
-
-                for (uint256 j; j < groupAllocation.allocations.length; j++) {
-                    Allocation memory allocation = groupAllocation.allocations[j];
-
-                    uint256 amount = (amountGroup * allocation.amountPerMille) / 1000;
-                    uint256 initial = (amount * groupAllocation.initialPerMille) / 1000;
-                    uint256 remainder = amount - initial;
-
-                    if (initial > 0) token.transfer(allocation.receiver, initial);
-                    vault.addAllocation(allocation.receiver, remainder, allocation.revocable);
-                }
-            }
-        }
-
-        vault.transferOwnership(msg.sender);
-    }
-}
 
 /**
  * @dev BEP20 Vesting contract. Releases the tokens linearly over the duration `VESTING_TERM`.
@@ -65,6 +14,14 @@ contract VestingDeployer {
  */
 contract VestingVault is Ownable {
     event AllocationAdded(address indexed receiver, uint256 amount, bool revocable);
+    event AllocationModified(address indexed receiver, uint256 amount, bool revocable);
+
+    struct Allocation {
+        address receiver;
+        uint256 amount;
+        uint256 claimed;
+        bool revocable;
+    }
 
     IBEP20 public token;
 
@@ -75,10 +32,12 @@ contract VestingVault is Ownable {
     uint256 public vestingStartDate;
     uint256 public vestingEndDate;
 
-    mapping(address => uint256) public totalClaimed;
-    mapping(address => uint256) public totalAllocation;
-    mapping(address => bool) public allowed;
-    mapping(address => bool) public revocable;
+    mapping(address => Allocation) public allocations;
+
+    // mapping(address => uint256) public totalClaimed;
+    // mapping(address => uint256) public totalAllocation;
+    // mapping(address => bool) public allowed;
+    // mapping(address => bool) public revocable;
 
     constructor(IBEP20 _token, uint256 _startDate) {
         require(_startDate >= block.timestamp, 'start date cannot lie in the past');
@@ -90,9 +49,18 @@ contract VestingVault is Ownable {
     // -------- view -------
 
     /**
-     * @dev Calculates the amount that is claimable by caller.
+     * @dev Returns the amount that is claimable by caller.
      */
     function claimableAmount(address receiver) public view returns (uint256) {
+        Allocation storage allocation = allocations[receiver];
+
+        return calculateReward(allocation.amount, allocation.claimed);
+    }
+
+    /**
+     * @dev Calculates the reward amount
+     */
+    function calculateReward(uint256 amount, uint256 claimed) public view returns (uint256) {
         if (block.timestamp < vestingStartDate) return 0;
 
         uint256 timeDelta = block.timestamp - vestingStartDate;
@@ -100,9 +68,9 @@ contract VestingVault is Ownable {
 
         if (timeDelta > VESTING_TERM) timeDelta = VESTING_TERM;
 
-        uint256 currentAllocation = (totalAllocation[receiver] * timeDelta) / VESTING_TERM;
+        uint256 totalPayout = (amount * timeDelta) / VESTING_TERM;
 
-        return currentAllocation - totalClaimed[receiver];
+        return totalPayout - claimed;
     }
 
     // -------- user api -------
@@ -114,13 +82,13 @@ contract VestingVault is Ownable {
      * Throws on token transfer failure.
      */
     function claim() external {
-        require(allowed[msg.sender], 'not allowed');
+        Allocation storage allocation = allocations[msg.sender];
 
-        uint256 claimable = claimableAmount(msg.sender);
-        require(claimable > 0, 'no tokens to claim');
+        uint256 reward = calculateReward(allocation.amount, allocation.claimed);
+        require(reward > 0, 'no tokens to claim');
 
-        totalClaimed[msg.sender] += claimable;
-        require(token.transfer(msg.sender, claimable), 'could not transfer token');
+        allocation.claimed += reward;
+        require(token.transfer(msg.sender, reward), 'could not transfer token');
     }
 
     // -------- admin -------
@@ -139,16 +107,54 @@ contract VestingVault is Ownable {
         uint256 amount,
         bool _revocable
     ) public onlyOwner onlyBeforeStart {
-        require(totalAllocation[receiver] == 0, 'must be unique allocation');
+        Allocation storage allocation = allocations[receiver];
+
+        require(allocation.amount == 0, 'cannot overwrite previous allocation');
         require(amount > 0, 'amount must be greater 0');
 
-        totalAllocation[receiver] = amount;
-        allowed[receiver] = true;
-        revocable[receiver] = _revocable;
+        allocation.amount = amount;
+        allocation.revocable = _revocable;
 
         require(token.transferFrom(msg.sender, address(this), amount), 'could not transfer token');
 
         emit AllocationAdded(receiver, amount, _revocable);
+    }
+
+    /**
+     * @dev Creates allocations in batches
+     */
+    function addAllocationBatch(Allocation[] memory _allocations) external onlyOwner onlyBeforeStart {
+        // XXX: passing in claimed in _allocations is unnecessary
+        for (uint256 i; i < _allocations.length; i++) {
+            Allocation memory allocation = _allocations[i];
+            addAllocation(allocation.receiver, allocation.amount, allocation.revocable); // XXX: duplicate modifier checks
+        }
+    }
+
+    function modifyAllocation(
+        address receiver,
+        uint256 amount,
+        bool _revocable
+    ) public onlyOwner onlyBeforeStart {
+        Allocation storage allocation = allocations[receiver];
+
+        require(allocation.amount != 0, 'no allocation found');
+        require(amount > 0, 'amount must be greater 0');
+
+        uint256 oldAmount = allocation.amount;
+
+        if (amount > oldAmount) {
+            uint256 additional = amount - oldAmount;
+            require(token.transferFrom(msg.sender, address(this), additional), 'could not transfer token');
+        } else {
+            uint256 surplus = oldAmount - amount;
+            require(token.transfer(msg.sender, surplus), 'could not transfer token');
+        }
+
+        allocation.amount = amount;
+        allocation.revocable = _revocable;
+
+        emit AllocationModified(receiver, amount, _revocable);
     }
 
     /**
@@ -159,17 +165,18 @@ contract VestingVault is Ownable {
      *  - allocation must be revocable
      */
     function revokeAllowance(address receiver) external onlyOwner {
-        require(revocable[receiver], 'allocation is not revocable');
+        Allocation storage allocation = allocations[receiver];
 
-        uint256 claimableReceiver = claimableAmount(receiver);
+        require(allocation.revocable, 'allocation is not revocable');
 
-        uint256 remainderOwner = totalAllocation[receiver] - claimableReceiver;
+        uint256 claimableReceiver = calculateReward(allocation.amount, allocation.claimed);
+        uint256 remainderOwner = allocation.amount - claimableReceiver;
 
-        allowed[receiver] = false;
-        totalAllocation[receiver] = 0;
+        allocation.amount = 0;
+        allocation.revocable = false;
 
         if (claimableReceiver > 0) {
-            totalClaimed[receiver] += claimableReceiver;
+            allocation.claimed += claimableReceiver; // could delete for gas refund
             require(token.transfer(receiver, claimableReceiver), 'could not transfer token');
         }
 
@@ -180,9 +187,11 @@ contract VestingVault is Ownable {
      * @dev Removes the ability of the owner to revoke this allocation.
      */
     function removeRevocability(address receiver) external onlyOwner {
-        require(allowed[receiver], 'receiver not allowed');
+        Allocation storage allocation = allocations[receiver];
 
-        revocable[receiver] = false;
+        require(allocation.revocable, 'allocation already unable to be revoked');
+
+        allocation.revocable = false;
     }
 
     /**

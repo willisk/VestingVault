@@ -4,6 +4,8 @@ const { ethers } = require('hardhat');
 const { BigNumber, utils } = require('ethers');
 const { getContractAddress } = require('@ethersproject/address');
 
+const { dispatchDistribution } = require('../scripts/utils.js');
+
 const BN = BigNumber.from;
 
 const { centerTime } = require('../scripts/time.js');
@@ -20,27 +22,33 @@ describe('Allocations', () => {
   let totalSupply;
   let vault;
   let owner;
+  let batchTransfer;
 
   beforeEach(async () => {
     [owner] = await ethers.getSigners();
 
     const GamingStars = await ethers.getContractFactory('GamingStars');
     const VestingVault = await ethers.getContractFactory('VestingVault');
-    const VaultDeployer = await ethers.getContractFactory('VestingDeployer');
+    const BatchTransfer = await ethers.getContractFactory('BatchTransfer');
 
     token = await GamingStars.deploy();
     await token.deployed();
     totalSupply = await token.totalSupply();
 
-    //NOTE: token should be ideally created in Vault itself, so it doesn't need pre-approval, but BEP20's 0.5.16 doesn't like to compile alongside 0.8.0 in hardhat
-    const nonce = await owner.getTransactionCount();
-    const deployerFutureAddress = getContractAddress({ from: owner.address, nonce: nonce + 1 });
+    // //NOTE: token should be ideally created in Vault itself, so it doesn't need pre-approval, but BEP20's 0.5.16 doesn't like to compile alongside 0.8.0 in hardhat
+    // const nonce = await owner.getTransactionCount();
+    // const deployerFutureAddress = getContractAddress({ from: owner.address, nonce: nonce + 1 });
 
-    await token.approve(deployerFutureAddress, ethers.constants.MaxUint256);
-    deployer = await VaultDeployer.deploy(token.address, vestingStartDate, allAllocations);
-    await deployer.deployed();
+    // await token.approve(deployerFutureAddress, ethers.constants.MaxUint256);
+    // deployer = await VaultDeployer.deploy(token.address, vestingStartDate, allAllocations);
+    // await deployer.deployed();
 
-    vault = await VestingVault.attach(await deployer.vaultAddress());
+    // vault = await VestingVault.attach(await deployer.vaultAddress());
+    vault = await VestingVault.deploy(token.address, vestingStartDate);
+    await vault.deployed();
+
+    batchTransfer = await BatchTransfer.deploy();
+    await batchTransfer.deployed();
   });
 
   // it('contract data', async () => {
@@ -84,6 +92,10 @@ describe('Allocations', () => {
   });
 
   it('all distributed allocations sum to totalSupply', async () => {
+    await dispatchDistribution(token, vault, allAllocations, batchTransfer);
+
+    // verify
+
     let totalAllocations = zero;
 
     for (let group of allAllocations) {
@@ -92,19 +104,17 @@ describe('Allocations', () => {
 
       for (let allocation of allocations) {
         const { receiver } = allocation;
-        const remainder = await vault.totalAllocation(receiver);
+        const vested = (await vault.allocations(receiver)).amount;
         const initial = await token.balanceOf(receiver);
-        const amount = initial.add(remainder);
+        const total = initial.add(vested);
 
-        totalAllocations = totalAllocations.add(amount);
-        totalAllocationsGroup = totalAllocationsGroup.add(amount);
+        totalAllocations = totalAllocations.add(total);
+        totalAllocationsGroup = totalAllocationsGroup.add(total);
       }
 
       const totalGroup = totalSupply.mul(BN(totalPerMille)).div(BN('1000'));
 
       expect(totalAllocationsGroup).to.equal(totalGroup);
     }
-
-    expect(totalAllocations).to.equal(totalSupply);
   });
 });

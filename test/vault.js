@@ -95,7 +95,7 @@ describe('VestingVault', () => {
 
     it('claimable amount is zero', async () => {
       expect(await vault.claimableAmount(owner.address)).to.equal(0);
-      await expect(vault.claim()).to.be.revertedWith('not allowed');
+      await expect(vault.claim()).to.be.revertedWith('no tokens to claim');
     });
 
     it('only owner can allocate allowance', async () => {
@@ -114,20 +114,21 @@ describe('VestingVault', () => {
 
     it('requirements are met', async () => {
       await expect(vault.addAllocation(receiver1.address, 10_000, true)).to.be.revertedWith(
-        'must be unique allocation'
+        'cannot overwrite previous allocation'
       );
       await expect(vault.addAllocation(signers[0].address, 0, true)).to.be.revertedWith('must be greater 0');
     });
 
     it('all fields are set correctly', async () => {
-      expect(await vault.totalClaimed(receiver1.address)).to.equal(0);
-      expect(await vault.totalAllocation(receiver1.address)).to.equal(10_000);
-      expect(await vault.allowed(receiver1.address)).to.equal(true);
-      expect(await vault.revocable(receiver1.address)).to.equal(true);
+      let allocation1 = await vault.allocations(receiver1.address);
+      expect(await allocation1.amount).to.equal(10_000);
+      expect(await allocation1.claimed).to.equal(0);
+      expect(await allocation1.revocable).to.equal(true);
 
-      expect(await vault.totalAllocation(receiver2.address)).to.equal(10);
-      expect(await vault.allowed(receiver2.address)).to.equal(true);
-      expect(await vault.revocable(receiver2.address)).to.equal(false);
+      let allocation2 = await vault.allocations(receiver2.address);
+      expect(await allocation2.amount).to.equal(10);
+      expect(await allocation2.claimed).to.equal(0);
+      expect(await allocation2.revocable).to.equal(false);
     });
 
     it('claimable amount is zero', async () => {
@@ -141,15 +142,60 @@ describe('VestingVault', () => {
       let ownerBalanceBefore = await token.balanceOf(owner.address);
 
       await vault.revokeAllowance(receiver1.address);
-      expect(await vault.totalAllocation(receiver1.address)).to.equal(0);
-      expect(await vault.allowed(receiver1.address)).to.equal(false);
 
+      expect((await vault.allocations(receiver1.address)).amount).to.equal(0);
       expect(await vault.claimableAmount(receiver1.address)).to.equal(0);
-      await expect(vault.connect(receiver1).claim()).to.be.revertedWith('not allowed');
+
+      await expect(vault.connect(receiver1).claim()).to.be.revertedWith('no tokens to claim');
 
       let ownerBalanceAfter = await token.balanceOf(owner.address);
 
       expect(ownerBalanceAfter.sub(ownerBalanceBefore)).to.equal(10_000);
+    });
+
+    it('allocation can be modified correctly', async () => {
+      await expect(vault.connect(receiver1).modifyAllocation(receiver1.address, 300, false)).to.be.revertedWith(
+        'Ownable: caller is not the owner'
+      );
+
+      let ownerBalanceBefore = await token.balanceOf(owner.address);
+      await vault.modifyAllocation(receiver1.address, 300, false);
+      let ownerBalanceAfter = await token.balanceOf(owner.address);
+
+      expect(ownerBalanceAfter.sub(ownerBalanceBefore)).to.equal(10_000 - 300);
+
+      let allocation1 = await vault.allocations(receiver1.address);
+      expect(await allocation1.amount).to.equal(300);
+      expect(await allocation1.revocable).to.equal(false);
+
+      ownerBalanceBefore = await token.balanceOf(owner.address);
+      await vault.modifyAllocation(receiver2.address, 600, false);
+      ownerBalanceAfter = await token.balanceOf(owner.address);
+
+      expect(ownerBalanceAfter.sub(ownerBalanceBefore)).to.equal(10 - 600);
+
+      let allocation2 = await vault.allocations(receiver2.address);
+      expect(await allocation2.amount).to.equal(600);
+      expect(await allocation2.revocable).to.equal(false);
+    });
+  });
+
+  describe('when creating batched allocations', async () => {
+    it('all fields are set correctly', async () => {
+      await vault.addAllocationBatch([
+        { receiver: receiver1.address, amount: 10_000, claimed: 0, revocable: true },
+        { receiver: receiver2.address, amount: 10, claimed: 0, revocable: false },
+      ]);
+
+      let allocation1 = await vault.allocations(receiver1.address);
+      expect(await allocation1.amount).to.equal(10_000);
+      expect(await allocation1.claimed).to.equal(0);
+      expect(await allocation1.revocable).to.equal(true);
+
+      let allocation2 = await vault.allocations(receiver2.address);
+      expect(await allocation2.amount).to.equal(10);
+      expect(await allocation2.claimed).to.equal(0);
+      expect(await allocation2.revocable).to.equal(false);
     });
   });
 
@@ -170,7 +216,7 @@ describe('VestingVault', () => {
     it('amount is correctly paid out over time', async () => {
       expect(await vault.claimableAmount(receiver1.address)).to.equal(0);
 
-      let totalAllocation = await vault.totalAllocation(receiver1.address);
+      let totalAllocation = (await vault.allocations(receiver1.address)).amount;
 
       await jumpToTime(time.future(vestingTerm / 3));
       let claimableAmount = parseInt((10_000 * parseInt(vestingTerm / 3 / time.delta1d) * time.delta1d) / vestingTerm);
@@ -178,12 +224,12 @@ describe('VestingVault', () => {
 
       await vault.connect(receiver1).claim();
       expect(await token.balanceOf(receiver1.address)).to.equal(claimableAmount);
-      expect(await vault.totalClaimed(receiver1.address)).to.equal(claimableAmount);
+      expect((await vault.allocations(receiver1.address)).claimed).to.equal(claimableAmount);
 
       await jumpToTime(vestingEndDate);
       claimableAmount = totalAllocation.sub(claimableAmount);
       await vault.connect(receiver1).claim();
-      expect(await vault.totalClaimed(receiver1.address)).to.equal(totalAllocation);
+      expect((await vault.allocations(receiver1.address)).claimed).to.equal(totalAllocation);
       expect(await token.balanceOf(receiver1.address)).to.equal(totalAllocation);
       expect(await vault.claimableAmount(receiver1.address)).to.equal(0);
 
@@ -199,7 +245,7 @@ describe('VestingVault', () => {
     });
 
     it('amount is calculated correctly', async () => {
-      let totalAllocation = await vault.totalAllocation(receiver1.address);
+      let totalAllocation = (await vault.allocations(receiver1.address)).amount;
       let ownerBalanceBefore = await token.balanceOf(owner.address);
 
       await jumpToTime(time.future(vestingTerm / 3));
@@ -207,7 +253,7 @@ describe('VestingVault', () => {
 
       await vault.revokeAllowance(receiver1.address);
       expect(await token.balanceOf(receiver1.address)).to.equal(claimableAmount);
-      expect(await vault.totalClaimed(receiver1.address)).to.equal(claimableAmount);
+      expect((await vault.allocations(receiver1.address)).claimed).to.equal(claimableAmount);
 
       let ownerBalanceAfter = await token.balanceOf(owner.address);
       expect(ownerBalanceAfter.sub(ownerBalanceBefore)).to.equal(totalAllocation.sub(claimableAmount));
